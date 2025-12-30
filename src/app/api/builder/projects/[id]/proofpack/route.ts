@@ -31,7 +31,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
         id: project.id,
         title: project.title,
         description: project.description,
-        build_type: project.build_type,
+        build_type: project.kind,
         status: project.status,
         created_at: project.created_at,
         updated_at: project.updated_at,
@@ -74,7 +74,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
     `# Zero17 Proof Pack
 
 Project: ${project.title}
-Build Type: ${project.build_type}
+Build Type: ${project.kind}
 Status: ${project.status}
 
 ## What is this?

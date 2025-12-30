@@ -1,47 +1,34 @@
 import { NextResponse } from "next/server";
-import {
-  requireUserOrDemo,
-  getProjectOrThrow,
-} from "@/app/api/builder/_shared";
 import type { BuilderProject } from "@/lib/builder/types";
+import {
+  loadProjectOrRes,
+  updateProjectOrRes,
+} from "@/app/api/builder/_project";
 
 type PostBody = {
   projectId: string;
   prompt?: string;
   mode?: "safe" | "aggressive";
-  // NEW:
   autofixFromDiagnostics?: boolean;
 };
-
-function clampText(s: string, max = 4000) {
-  const t = (s ?? "").toString();
-  return t.length > max ? t.slice(0, max) : t;
-}
 
 function iso() {
   return new Date().toISOString();
 }
-
 function mkId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+}
+function clampText(s: string, max = 2500) {
+  const t = (s ?? "").toString();
+  return t.length > max ? t.slice(0, max) : t;
 }
 
 function extractTopDiagnostic(project: BuilderProject) {
   const diags: any = (project as any)?.diagnostics_json ?? null;
   const items: any[] = diags?.items ?? [];
-  if (items.length === 0) return null;
-
-  // Items are already ROI-ranked in your v2 diagnostics.
-  const top = items[0];
-  return top;
+  return items.length ? items[0] : null;
 }
 
-/**
- * Phase 4 Refine Engine v2:
- * - prompt-based refine plan (existing)
- * - NEW: autofixFromDiagnostics mode (one-click)
- * - Stores into export_plan_json.refinements[]
- */
 function buildRefinePlan(input: {
   project: BuilderProject;
   prompt: string;
@@ -49,101 +36,16 @@ function buildRefinePlan(input: {
   source: "user_prompt" | "autofix";
 }) {
   const { project, prompt, mode, source } = input;
-
   const p = prompt.toLowerCase();
+
   const tags = [
-    p.includes("ui") || p.includes("design") || p.includes("layout")
-      ? "ui"
-      : null,
-    p.includes("api") || p.includes("endpoint") ? "api" : null,
-    p.includes("db") || p.includes("schema") ? "db" : null,
-    p.includes("auth") || p.includes("login") ? "auth" : null,
-    p.includes("agent") ? "agent" : null,
+    p.includes("ui") ? "ui" : null,
+    p.includes("api") ? "api" : null,
+    p.includes("db") ? "db" : null,
+    p.includes("auth") ? "auth" : null,
     p.includes("test") ? "tests" : null,
-    p.includes("deploy") || p.includes("vercel") ? "deploy" : null,
-    p.includes("performance") ? "perf" : null,
-    p.includes("security") ? "security" : null,
+    p.includes("deploy") ? "deploy" : null,
   ].filter(Boolean) as string[];
-
-  const filesTouched: { path: string; reason: string }[] = [
-    {
-      path: "src/lib/builder/types.ts",
-      reason: "If new JSON shapes are introduced.",
-    },
-    {
-      path: "src/app/api/builder/*",
-      reason: "API changes if behavior needs adjustment.",
-    },
-    {
-      path: "src/app/builder/components/*",
-      reason: "UI changes for user-visible behavior.",
-    },
-  ];
-
-  // If prompt signals specific areas, bias paths
-  if (tags.includes("tests")) {
-    filesTouched.unshift({
-      path: "src/app/api/builder/test/route.ts",
-      reason:
-        "Virtual tests may need updates to reflect the new expected behavior.",
-    });
-  }
-  if (tags.includes("deploy")) {
-    filesTouched.unshift({
-      path: "src/app/api/builder/deploy-plan/route.ts",
-      reason: "Deploy blueprint updates (env vars, smoke tests, rollbacks).",
-    });
-  }
-
-  const steps: { id: string; title: string; detail: string }[] = [
-    {
-      id: "rewrite_goal",
-      title: "Rewrite as acceptance",
-      detail:
-        "Convert the fix into 2–5 acceptance statements (what must be true after changes).",
-    },
-    {
-      id: "choose_minimum_edits",
-      title: "Minimum edits",
-      detail:
-        "Pick the smallest set of file edits that solve the issue without side effects.",
-    },
-    {
-      id: "safety_checks",
-      title: "Safety checks",
-      detail:
-        "Ensure Create Project flow stays intact, APIs return {project}, and JSON shapes remain typed.",
-    },
-    {
-      id: "verify_loop",
-      title: "Verify loop",
-      detail:
-        "Run Phase 3 → Phase 5 → Phase 6 → Phase 10. Confirm the diagnostic disappears or drops priority.",
-    },
-  ];
-
-  if (mode === "aggressive") {
-    steps.unshift({
-      id: "aggressive_cut",
-      title: "Aggressive simplification",
-      detail:
-        "Remove optional branches, reduce UI friction, optimize for ship speed and clarity.",
-    });
-  }
-
-  const riskChecks = [
-    "Never break Create Builder Project",
-    "APIs must return { project } always",
-    "No DB schema changes without migrations",
-    "Keep phases modular (one phase cannot silently depend on another)",
-    "Update types.ts first if JSON shape changes",
-  ];
-
-  const rollback = [
-    "Revert the last commit",
-    "Restore previous route/component file",
-    "Re-run Phase 6 tests after rollback to ensure stability",
-  ];
 
   return {
     id: mkId("ref"),
@@ -151,52 +53,35 @@ function buildRefinePlan(input: {
     source,
     mode,
     tags,
-    prompt: clampText(prompt, 2500),
+    prompt: clampText(prompt),
     goal:
       source === "autofix"
         ? `Autofix Plan generated from top diagnostic for “${project.title}”.`
-        : `Refine “${project.title}” based on prompt (mode: ${mode}).`,
-    assumptions: [
-      "Supabase rail for persistence.",
-      "Artifacts stored in builder_projects JSON columns.",
-      "Deterministic plans first; execution can be automated later.",
-    ],
-    filesTouched,
-    steps,
-    riskChecks,
-    rollback,
+        : `Refine “${project.title}” (mode: ${mode}).`,
   };
 }
 
 export async function POST(req: Request) {
-  const { supabase, userId } = await requireUserOrDemo();
-
-  let body: PostBody;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
-
-  const projectId = body?.projectId;
-  const mode = (body?.mode ?? "safe") as "safe" | "aggressive";
-  const autofix = !!body?.autofixFromDiagnostics;
-
-  if (!projectId)
+  const body = (await req.json().catch(() => null)) as PostBody | null;
+  if (!body?.projectId)
     return NextResponse.json({ error: "Missing projectId" }, { status: 400 });
 
-  const loaded = await getProjectOrThrow({
-    supabase,
-    projectId,
-    userId,
+  const loaded = await loadProjectOrRes({
+    projectId: body.projectId,
     caller: "POST /api/builder/refine",
   });
   if (loaded.res) return loaded.res;
 
-  const project = loaded.project as BuilderProject;
+  const { project, userId, supabase } = loaded;
 
-  // Determine prompt
-  let prompt = (body?.prompt ?? "").toString().trim();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const mode = (body.mode ?? "safe") as "safe" | "aggressive";
+  const autofix = !!body.autofixFromDiagnostics;
+
+  let prompt = (body.prompt ?? "").toString().trim();
   let source: "user_prompt" | "autofix" = "user_prompt";
 
   if (autofix) {
@@ -207,48 +92,35 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-
     source = "autofix";
-    // Turn top diagnostic into a strong refine prompt
-    prompt =
-      `AUTOFIX TARGET:\n` +
-      `Area: ${top.area}\n` +
-      `Symptom: ${top.symptom}\n` +
-      `Likely cause: ${top.likelyCause}\n\n` +
-      `Goal:\nFix this issue with minimal edits. Keep APIs returning {project}. ` +
-      `Update types first if JSON shape changes. After fix, rerun Phase 6 + Phase 10 and ensure priority drops.\n\n` +
-      `Suggested fix:\n${top.suggestedFix}\n`;
+    prompt = `AUTOFIX TARGET:\nArea: ${top.area}\nSymptom: ${top.symptom}\n\nSuggested fix:\n${top.suggestedFix}\n`;
   }
 
   if (!prompt)
     return NextResponse.json({ error: "Missing prompt" }, { status: 400 });
 
-  const refine = buildRefinePlan({ project, prompt, mode, source });
+  const refine = buildRefinePlan({
+    project,
+    prompt,
+    mode,
+    source,
+  });
 
-  const exportPlan = (project.export_plan_json ?? {}) as any;
+  const exportPlan: any = project.export_plan_json ?? {};
   const next = {
     ...exportPlan,
     refinements: [refine, ...(exportPlan.refinements ?? [])].slice(0, 20),
   };
 
-  const { data: updated, error: updateErr } = await supabase
-    .from("builder_projects")
-    .update({
-      export_plan_json: next,
-      status: "codegen_planned",
-    })
-    .eq("id", projectId)
-    .eq("user_id", userId)
-    .select("*")
-    .single();
+  const res = await updateProjectOrRes({
+    projectId: project.id,
+    userId,
+    supabase,
+    patch: { export_plan_json: next, status: "refined" },
+    caller: "POST /api/builder/refine",
+  });
 
-  if (updateErr) {
-    console.error("[POST /api/builder/refine] update error:", updateErr);
-    return NextResponse.json(
-      { error: "Failed to save refine plan" },
-      { status: 500 }
-    );
-  }
-
-  return NextResponse.json({ project: updated, refine }, { status: 200 });
+  return (
+    res.res ?? NextResponse.json({ project: res.project }, { status: 200 })
+  );
 }

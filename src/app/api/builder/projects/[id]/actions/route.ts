@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { getUserIdOrDev } from "@/lib/builder/server/auth";
 import { devFindProject } from "@/lib/builder/server/store";
 import { runBuildFactoryV3 } from "@/lib/builder/server/buildFactoryV3";
-import { generateProofPackZip } from "@/lib/builder/server/proofPack";
+import { buildProofPack } from "@/lib/builder/server/proofPack";
 
 export const dynamic = "force-dynamic";
 
@@ -35,9 +35,9 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
 
   // PROOF PACK ZIP
   if (body.action === "proofpack") {
-    const zip = await generateProofPackZip(project, body.buildReport);
+    const zip = await buildProofPack(project);
 
-    return new NextResponse(zip, {
+    return new NextResponse(zip as any, {
       headers: {
         "Content-Type": "application/zip",
         "Content-Disposition": `attachment; filename=zero17-proofpack-${project.id}.zip`,

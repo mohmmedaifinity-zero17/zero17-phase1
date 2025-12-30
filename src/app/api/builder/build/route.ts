@@ -3,11 +3,10 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
-import type {
-  BuilderProject,
-  MultiLensSpec,
-  ArchitectureMap,
-} from "@/lib/builder/types";
+import type { BuilderProject } from "@/lib/builder/types";
+
+type MultiLensSpec = any;
+type ArchitectureMap = any;
 import {
   generateProjectScaffold,
   writeGeneratedProject,

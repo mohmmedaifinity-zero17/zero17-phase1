@@ -1,7 +1,5 @@
 // src/lib/builder/server/patchHistory.ts
 
-import type { BuilderProject } from "../types";
-
 export type PatchType =
   | "spec"
   | "architecture"
@@ -13,15 +11,11 @@ export type PatchType =
 
 export type PatchEntry = {
   id: string;
-  type?: PatchType;
-  description?: string;
-  before?: any;
-  after?: any;
+  type: PatchType;
+  description: string;
+  before: any;
+  after: any;
   createdAt: string;
-  label?: string;
-  note?: string;
-  author?: string;
-  snapshot?: Partial<BuilderProject>;
 };
 
 export function createPatch(

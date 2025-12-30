@@ -1,44 +1,32 @@
 import { NextResponse } from "next/server";
 import {
-  requireUserOrDemo,
-  getProjectOrThrow,
-} from "@/app/api/builder/_shared";
+  loadProjectOrRes,
+  updateProjectOrRes,
+} from "@/app/api/builder/_project";
 import type { BuilderProject } from "@/lib/builder/types";
 
-type PostBody = {
-  projectId: string;
-  // if omitted, we apply latest refinement plan
-  refineId?: string;
-};
+type PostBody = { projectId: string; refineId?: string };
 
 function iso() {
   return new Date().toISOString();
 }
-
 function mkId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function minimalSpec(buildType: string) {
-  // Minimal, safe skeleton (works for all build types)
   return {
     productLens: {
       oneLiner: "Auto-generated spec skeleton (Patch Engine v1).",
       targetUsers: ["early adopters"],
       coreValue: "Turn intent into a structured build plan and execution rail.",
-      mustHaveFeatures: ["Auth (later)", "Project persistence", "Core flows"],
-    },
-    uxLens: {
-      tone: "premium, clean, high-contrast",
-      layout: "cards + rails",
-      accessibility: "AA target",
+      mustHaveFeatures: ["Project persistence", "Core flows"],
     },
     qaLens: {
       acceptanceTests: [
         "Create project persists",
         "Save spec persists",
         "Save architecture persists",
-        "Run tests stores test_plan_json",
       ],
     },
     agentLens:
@@ -47,21 +35,9 @@ function minimalSpec(buildType: string) {
             agents: [
               {
                 name: "Supervisor",
-                mission: "Coordinate sub-agents and enforce guardrails.",
-                tools: ["db", "fetch", "planner"],
-                handoffs: ["Builder", "QA"],
-              },
-              {
-                name: "Builder",
-                mission: "Translate spec+arch into build actions.",
-                tools: ["planner", "diff"],
+                mission: "Coordinate sub-agents.",
+                tools: ["planner"],
                 handoffs: ["QA"],
-              },
-              {
-                name: "QA",
-                mission: "Run checks and propose fixes.",
-                tools: ["tests", "scan"],
-                handoffs: ["Supervisor"],
               },
             ],
           }
@@ -70,130 +46,38 @@ function minimalSpec(buildType: string) {
 }
 
 function minimalArchitecture(buildType: string) {
-  const entities = [
-    {
-      id: "user",
-      name: "User",
-      description: "Authenticated user (Supabase auth.users)",
-      kind: "data",
-      notes: "Owned by Supabase Auth",
-    },
-    {
-      id: "builder_project",
-      name: "BuilderProject",
-      description: "builder_projects row (core artifact store)",
-      kind: "data",
-      notes: "JSON columns store spec/arch/tests/docs/diagnostics",
-    },
-  ];
-
-  if (buildType === "agent" || buildType === "workflow") {
-    entities.push({
-      id: "agent_run",
-      name: "AgentRun",
-      description: "Execution trace for agent sessions",
-      kind: "data",
-      notes: "Optional table later; v1 can store traces in JSON",
-    } as any);
-  }
-
   return {
     infra: {
       authProvider: "supabase",
       database: "supabase-postgres",
       hosting: "vercel",
-      logging: "console (v1) → structured logs (v2)",
     },
-    entities,
+    entities: [
+      {
+        id: "builder_project",
+        name: "BuilderProject",
+        description: "builder_projects row",
+        kind: "data",
+      },
+    ],
     screens: [
-      {
-        id: "builder_home",
-        name: "Builder",
-        purpose: "Create/select projects and execute phases",
-      },
+      { id: "builder_home", name: "Builder", purpose: "Execute phases" },
     ],
-  };
-}
-
-function minimalDeploymentPlan(project: BuilderProject) {
-  return {
-    target: "vercel",
-    envVars: [
-      {
-        key: "NEXT_PUBLIC_SUPABASE_URL",
-        required: true,
-        hint: "Supabase project URL",
-      },
-      {
-        key: "NEXT_PUBLIC_SUPABASE_ANON_KEY",
-        required: true,
-        hint: "Supabase anon key",
-      },
-    ],
-    steps: [
-      {
-        id: "repo",
-        title: "Push to GitHub",
-        detail: "Commit and push main branch.",
-      },
-      {
-        id: "env",
-        title: "Set env vars",
-        detail: "Vercel → Project Settings → Environment Variables.",
-      },
-      {
-        id: "db",
-        title: "Verify DB + RLS",
-        detail: "Confirm RLS policies allow project owner access only.",
-      },
-      {
-        id: "deploy",
-        title: "Deploy",
-        detail: "Deploy to Vercel and verify routes.",
-      },
-    ],
-    smokeChecks: [
-      "Open /builder and verify UI loads",
-      "Create builder project and confirm persistence",
-      "Run Phase 6 tests and Phase 10 diagnostics once",
-    ],
-    rollback: [
-      "Rollback to previous Vercel deployment",
-      "Revert commit if needed",
-    ],
-    summary: `Deploy blueprint generated by Patch Engine v1 for “${project.title}”.`,
   };
 }
 
 function selectRefinePlan(project: BuilderProject, refineId?: string) {
-  const ep: any = (project as any)?.export_plan_json ?? {};
+  const ep: any = project.export_plan_json ?? {};
   const refinements: any[] = ep?.refinements ?? [];
-  if (refinements.length === 0) return null;
-
+  if (!refinements.length) return null;
   if (!refineId) return refinements[0];
   return refinements.find((r) => r.id === refineId) ?? null;
 }
 
-/**
- * Patch Engine v1 (Deterministic & Safe)
- * - Only edits JSON artifact columns (no filesystem edits)
- * - Uses latest refine plan (autofix) to decide what to fill
- */
 function computePatch(project: BuilderProject, refine: any) {
-  const before = {
-    hasSpec: !!project.spec_json,
-    hasArch: !!project.architecture_json,
-    hasDeploy: !!project.deployment_plan_json,
-  };
-
   const prompt: string = (refine?.prompt ?? "").toString().toLowerCase();
   const source: string = (refine?.source ?? "user_prompt").toString();
-
-  // We only “auto apply” for autofix plans by default
   const allow = source === "autofix";
-
-  const changes: any = {};
-  const actions: string[] = [];
 
   if (!allow) {
     return {
@@ -203,55 +87,17 @@ function computePatch(project: BuilderProject, refine: any) {
     };
   }
 
-  // Decide what to patch (very safe)
-  // 1) Spec missing
-  if (
-    !project.spec_json &&
-    (prompt.includes("spec") ||
-      prompt.includes("phase 1") ||
-      prompt.includes("spec_json"))
-  ) {
-    changes.spec_json = minimalSpec(project.kind ?? "app");
-    actions.push("Filled spec_json with minimal safe skeleton.");
-  }
+  const changes: any = {};
+  const actions: string[] = [];
 
-  // 2) Architecture missing
-  if (
-    !project.architecture_json &&
-    (prompt.includes("architecture") ||
-      prompt.includes("phase 2") ||
-      prompt.includes("architecture_json"))
-  ) {
-    changes.architecture_json = minimalArchitecture(project.kind ?? "app");
-    actions.push("Filled architecture_json with minimal safe skeleton.");
-  }
-
-  // 3) Deploy plan missing (optional)
-  if (
-    !project.deployment_plan_json &&
-    (prompt.includes("deploy") ||
-      prompt.includes("deployment") ||
-      prompt.includes("phase 6"))
-  ) {
-    changes.deployment_plan_json = minimalDeploymentPlan(project);
-    actions.push("Generated minimal deployment_plan_json.");
-  }
-
-  // If prompt is vague but fundamentals missing, still patch fundamentals (safe default)
-  if (!project.spec_json && !changes.spec_json) {
+  if (!project.spec_json) {
     changes.spec_json = minimalSpec(project.kind ?? "app");
     actions.push("Filled spec_json (safe default).");
   }
-  if (!project.architecture_json && !changes.architecture_json) {
+  if (!project.architecture_json) {
     changes.architecture_json = minimalArchitecture(project.kind ?? "app");
     actions.push("Filled architecture_json (safe default).");
   }
-
-  const after = {
-    hasSpec: !!(changes.spec_json ?? project.spec_json),
-    hasArch: !!(changes.architecture_json ?? project.architecture_json),
-    hasDeploy: !!(changes.deployment_plan_json ?? project.deployment_plan_json),
-  };
 
   const patchLog = {
     id: mkId("patch"),
@@ -259,88 +105,69 @@ function computePatch(project: BuilderProject, refine: any) {
     refineId: refine?.id ?? null,
     source: "patch_engine_v1",
     actions,
-    before,
-    after,
   };
 
   return { ok: true, changes, patchLog };
 }
 
 export async function POST(req: Request) {
-  const { supabase, userId } = await requireUserOrDemo();
-
-  let body: PostBody;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
-
-  const projectId = body?.projectId;
-  if (!projectId)
+  const body = await req.json().catch(() => ({}));
+  if (!body.projectId)
     return NextResponse.json({ error: "Missing projectId" }, { status: 400 });
 
-  const loaded = await getProjectOrThrow({
-    supabase,
-    projectId,
-    userId,
+  const loaded = await loadProjectOrRes({
+    projectId: body.projectId,
     caller: "POST /api/builder/apply-patch",
   });
   if (loaded.res) return loaded.res;
 
-  const project = loaded.project as BuilderProject;
+  const { project, userId, supabase } = loaded;
+
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   const refine = selectRefinePlan(project, body.refineId);
-  if (!refine) {
+  if (!refine)
     return NextResponse.json(
       { error: "No refine plans found. Create Autofix Plan first." },
       { status: 400 }
     );
-  }
 
   const computed = computePatch(project, refine);
-  if (!computed.ok) {
+  if (!computed.ok)
     return NextResponse.json({ error: computed.error }, { status: 400 });
-  }
 
-  const ep: any = project.export_plan_json ?? {};
-  const patches = [computed.patchLog, ...(ep.patches ?? [])].slice(0, 30);
+  const existingPatches = (project.patches as any[]) ?? [];
+  const nextPatches = [computed.patchLog, ...existingPatches].slice(0, 50);
 
-  // Compute status progression (safe)
-  let nextStatus = project.status;
+  // Status progression
   const hasSpec = !!(computed.changes.spec_json ?? project.spec_json);
   const hasArch = !!(
     computed.changes.architecture_json ?? project.architecture_json
   );
 
+  let nextStatus = project.status;
   if (hasSpec && !hasArch) nextStatus = "structured";
   if (hasSpec && hasArch) nextStatus = "architected";
 
-  const updatePayload: any = {
-    ...computed.changes,
-    export_plan_json: { ...ep, patches },
-    status: nextStatus,
-    updated_at: iso(),
-  };
+  const res = await updateProjectOrRes({
+    projectId: project.id,
+    userId,
+    supabase,
+    patch: {
+      ...computed.changes,
+      patches: nextPatches,
+      status: nextStatus,
+    },
+    caller: "POST /api/builder/apply-patch",
+  });
 
-  const { data: updated, error: updateErr } = await supabase
-    .from("builder_projects")
-    .update(updatePayload)
-    .eq("id", projectId)
-    .eq("user_id", userId)
-    .select("*")
-    .single();
-
-  if (updateErr) {
-    console.error("[POST /api/builder/apply-patch] update error:", updateErr);
-    return NextResponse.json(
-      { error: "Failed to apply patch" },
-      { status: 500 }
-    );
-  }
-
-  return NextResponse.json(
-    { project: updated, patch: computed.patchLog },
-    { status: 200 }
+  return (
+    res.res ??
+    NextResponse.json(
+      { project: res.project, patch: computed.patchLog },
+      { status: 200 }
+    )
   );
 }

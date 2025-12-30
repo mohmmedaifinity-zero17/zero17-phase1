@@ -1,10 +1,10 @@
 // src/app/api/builder/import-from-research/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { createServerClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server";
 
 export async function GET(_req: NextRequest) {
   try {
-    const supabase = createServerClient();
+    const supabase = createClient();
     const {
       data: { user },
       error: userError,

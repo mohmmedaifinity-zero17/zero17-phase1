@@ -1,10 +1,5 @@
 // src/lib/builder/types.ts
 
-import type { PatchEntry } from "./server/patchHistory";
-export type { PatchEntry };
-
-export type { DocsPack } from "./docs-pack";
-
 export type BuilderBuildType = "app" | "agent" | "dashboard" | "workflow";
 
 export type AgentMode = "draft" | "shadow" | "production";
@@ -35,75 +30,89 @@ export type BrandingOverrides = {
   logoDataUrl?: string; // base64 data URL (fast dev; later we move to storage)
 };
 
-export type TestCaseStatus =
-  | "not_run"
-  | "pass"
-  | "fail"
-  | "virtual_fail"
-  | "virtual_pass";
-export type TestCaseArea =
-  | "happy_path"
-  | "edge_case"
-  | "failure"
-  | "performance";
-export type TestCaseRisk = "low" | "medium" | "high";
+export type PatchEntry = {
+  id: string;
+  label: string;
+  note: string;
+  createdAt: string;
+  author: string;
+  snapshot: Partial<BuilderProject>;
+};
+
+export type ExportFile = {
+  path: string;
+  kind: string;
+  description: string;
+  purpose?: string;
+};
+
+export type ExportPlan = {
+  summary: string;
+  stackHint?: string;
+  files?: ExportFile[];
+  fileTree?: any[];
+  commands?: string[];
+  cliNotes?: string[];
+  notes?: string[];
+  refinements?: any[];
+  patches?: any[];
+  locked_fixes?: any[];
+};
+
+export type DeploymentStep = {
+  id: string;
+  category?: string;
+  title: string;
+  description?: string;
+  detail?: string;
+};
+
+export type DeploymentPlan = {
+  target: string;
+  envVars?: Array<{
+    key: string;
+    required: boolean;
+    hint: string;
+  }>;
+  steps?: DeploymentStep[];
+  smokeChecks?: string[];
+  rollback?: string[];
+  summary: string;
+};
 
 export type TestCase = {
   id: string;
   title: string;
   description: string;
-  area: TestCaseArea;
-  risk: TestCaseRisk;
-  status: TestCaseStatus;
-  notes: string;
+  area: string;
+  risk: string;
+  status: string;
   lastRunAt: string;
+  notes?: string;
 };
 
 export type TestPlan = {
   summary: string;
-  coverageAreas: string[];
+  coverageAreas?: string[];
   cases: TestCase[];
 };
-
-export type DiagnosticSeverity = "info" | "warning" | "error";
 
 export type DiagnosticItem = {
   id: string;
   area: string;
-  severity: DiagnosticSeverity;
+  severity: "error" | "warning" | "info";
   symptom: string;
   likelyCause: string;
   suggestedFix: string;
+  roi?: number;
+  priority?: number;
+  minutes?: number;
+  phase?: string;
 };
 
 export type DiagnosticsReport = {
   summary: string;
   items: DiagnosticItem[];
-};
-
-export type ExportFile = {
-  path: string;
-  kind: "layout" | "page" | "schema" | "infra" | "config" | "test" | "doc";
-  description: string;
-};
-
-export type ExportPlan = {
-  summary: string;
-  fileTree?: Array<{ path: string; purpose: string }>;
-  files?: ExportFile[];
-  commands?: string[];
-  notes?: string[];
-  cliNotes?: string[];
-  stackHint?: string;
-};
-
-export type DeploymentPlan = {
-  target: string;
-  envVars: Array<{ key: string; required: boolean; hint: string }>;
-  steps: Array<{ id: string; title: string; detail: string }>;
-  smokeChecks: string[];
-  rollback: string[];
-  summary: string;
 };
 
 export type BuilderProject = {
@@ -126,20 +135,19 @@ export type BuilderProject = {
   // Canonical artifacts (existing fields in your app)
   spec_json?: any;
   architecture_json?: any;
-  test_plan_json?: TestPlan | null;
-  scan_report_json?: any;
   api_json?: any;
   ui_json?: any;
   ops_json?: any;
   docs_json?: any;
-  docs_pack_json?: any;
-  deployment_plan_json?: any;
   diagnostics_json?: any;
   export_plan_json?: any;
+  test_plan_json?: TestPlan;
+  deployment_plan_json?: DeploymentPlan;
+  scan_report_json?: any;
+  docs_pack_json?: any;
 
   // NEW (safe optional)
   patches?: PatchEntry[];
   agents?: AgentEmployee[];
   branding?: BrandingOverrides;
-  ledger?: any[];
 };

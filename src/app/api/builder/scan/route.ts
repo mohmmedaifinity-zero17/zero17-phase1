@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import type { BuilderProject } from "@/lib/builder/types";
 import {
-  requireUserOrDemo,
-  getProjectOrThrow,
-} from "@/app/api/builder/_shared";
+  loadProjectOrRes,
+  updateProjectOrRes,
+} from "@/app/api/builder/_project";
 
 type PostBody = { projectId: string };
 
@@ -18,9 +18,10 @@ function buildScan(project: BuilderProject) {
       category: "reliability",
       severity: "high",
       description: "Architecture missing.",
-      recommendation: "Complete Phase 2.",
+      recommendation: "Complete Phase 2 and Save Architecture.",
     });
   }
+
   if (!project.test_plan_json) {
     score -= 10;
     issues.push({
@@ -28,7 +29,7 @@ function buildScan(project: BuilderProject) {
       category: "reliability",
       severity: "medium",
       description: "Virtual tests not run.",
-      recommendation: "Run Phase 5.",
+      recommendation: "Run Phase 5 Virtual Tests.",
     });
   }
 
@@ -36,42 +37,33 @@ function buildScan(project: BuilderProject) {
 }
 
 export async function POST(req: Request) {
-  const { supabase, userId } = await requireUserOrDemo();
-
-  let body: PostBody;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
-  if (!body.projectId)
+  const body = (await req.json().catch(() => null)) as PostBody | null;
+  if (!body?.projectId)
     return NextResponse.json({ error: "Missing projectId" }, { status: 400 });
 
-  const loaded = await getProjectOrThrow({
-    supabase,
+  const loaded = await loadProjectOrRes({
     projectId: body.projectId,
-    userId,
     caller: "POST /api/builder/scan",
   });
   if (loaded.res) return loaded.res;
 
-  const report = buildScan(loaded.project as BuilderProject);
+  const { project, userId, supabase } = loaded;
 
-  const { data: updated, error: updateErr } = await supabase
-    .from("builder_projects")
-    .update({ scan_report_json: report, status: "scanned" })
-    .eq("id", body.projectId)
-    .eq("user_id", userId)
-    .select("*")
-    .single();
-
-  if (updateErr) {
-    console.error("[POST /api/builder/scan] update error:", updateErr);
-    return NextResponse.json(
-      { error: "Failed to save scan report" },
-      { status: 500 }
-    );
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  return NextResponse.json({ project: updated }, { status: 200 });
+  const report = buildScan(project);
+
+  const res = await updateProjectOrRes({
+    projectId: project.id,
+    userId,
+    supabase,
+    patch: { scan_report_json: report, status: "scanned" },
+    caller: "POST /api/builder/scan",
+  });
+
+  return (
+    res.res ?? NextResponse.json({ project: res.project }, { status: 200 })
+  );
 }

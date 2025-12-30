@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import type { BuilderProject, ExportPlan } from "@/lib/builder/types";
 import {
-  requireUserOrDemo,
-  getProjectOrThrow,
-} from "@/app/api/builder/_shared";
+  loadProjectOrRes,
+  updateProjectOrRes,
+} from "@/app/api/builder/_project";
 
 type PostBody = { projectId: string };
 
@@ -44,49 +44,38 @@ function buildExportPlan(project: BuilderProject): ExportPlan {
     commands: ["npm i", "npm run dev"],
     notes: [
       "Planner-first: deterministic scaffold plan stored in export_plan_json.",
-      "Next: Refine → Virtual tests → Deploy blueprint.",
     ],
   } as any;
 }
 
 export async function POST(req: Request) {
-  const { supabase, userId } = await requireUserOrDemo();
-
-  let body: PostBody;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
-  if (!body.projectId)
+  const body = (await req.json().catch(() => null)) as PostBody | null;
+  if (!body?.projectId)
     return NextResponse.json({ error: "Missing projectId" }, { status: 400 });
 
-  const loaded = await getProjectOrThrow({
-    supabase,
+  const loaded = await loadProjectOrRes({
     projectId: body.projectId,
-    userId,
     caller: "POST /api/builder/codegen",
   });
   if (loaded.res) return loaded.res;
 
-  const project = loaded.project as BuilderProject;
-  const exportPlan = buildExportPlan(project);
+  const { project, userId, supabase } = loaded;
 
-  const { data: updated, error: updateErr } = await supabase
-    .from("builder_projects")
-    .update({ export_plan_json: exportPlan, status: "codegen_planned" })
-    .eq("id", project.id)
-    .eq("user_id", userId)
-    .select("*")
-    .single();
-
-  if (updateErr) {
-    console.error("[POST /api/builder/codegen] update error:", updateErr);
-    return NextResponse.json(
-      { error: "Failed to save codegen plan" },
-      { status: 500 }
-    );
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  return NextResponse.json({ project: updated }, { status: 200 });
+  const exportPlan = buildExportPlan(project);
+
+  const res = await updateProjectOrRes({
+    projectId: project.id,
+    userId,
+    supabase,
+    patch: { export_plan_json: exportPlan, status: "codegen_planned" },
+    caller: "POST /api/builder/codegen",
+  });
+
+  return (
+    res.res ?? NextResponse.json({ project: res.project }, { status: 200 })
+  );
 }

@@ -2,8 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
-import type { Session } from "@supabase/supabase-js";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
 type ViewState =
   | { mode: "loading" }
@@ -11,7 +10,7 @@ type ViewState =
   | { mode: "signed_in"; email: string };
 
 export default function GlobalAuthBar() {
-  const supabase = createClient();
+  const supabase = createClientComponentClient();
   const [state, setState] = useState<ViewState>({ mode: "loading" });
 
   useEffect(() => {
@@ -27,12 +26,10 @@ export default function GlobalAuthBar() {
 
     boot();
 
-    const { data: sub } = supabase.auth.onAuthStateChange(
-      (_evt: string, session: Session | null) => {
-        const email = session?.user?.email ?? null;
-        setState(email ? { mode: "signed_in", email } : { mode: "signed_out" });
-      }
-    );
+    const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
+      const email = session?.user?.email ?? null;
+      setState(email ? { mode: "signed_in", email } : { mode: "signed_out" });
+    });
 
     return () => {
       mounted = false;

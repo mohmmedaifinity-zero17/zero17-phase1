@@ -3,16 +3,14 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server"; // adjust if needed
-import type {
-  BuilderProject,
-  BuilderBuildType,
-  MultiLensSpec,
-  ArchitectureMap,
-  ArchitectureScreen,
-  ArchitectureEntity,
-  ArchitectureApi,
-  ArchitectureInfra,
-} from "@/lib/builder/types";
+import type { BuilderProject, BuilderBuildType } from "@/lib/builder/types";
+
+type MultiLensSpec = any;
+type ArchitectureMap = any;
+type ArchitectureScreen = any;
+type ArchitectureEntity = any;
+type ArchitectureApi = any;
+type ArchitectureInfra = any;
 
 type GenerateBody = {
   mode: "generate";
@@ -135,7 +133,7 @@ export async function POST(req: Request) {
     const spec = project.spec_json as MultiLensSpec;
     const arch = generateStubArchitecture(
       spec,
-      project.build_type,
+      project.kind ?? "app",
       project.title
     );
 
@@ -225,11 +223,7 @@ function generateStubArchitecture(
     },
   ];
 
-  if (
-    buildType === "app" ||
-    buildType === "dashboard" ||
-    buildType === "client_project"
-  ) {
+  if (buildType === "app" || buildType === "dashboard") {
     baseScreens.push(
       {
         id: "primary",
@@ -245,7 +239,8 @@ function generateStubArchitecture(
     );
   }
 
-  if (buildType === "landing") {
+  // Landing page can be added for app type
+  if (buildType === "app") {
     baseScreens.push({
       id: "landing",
       name: "Landing",
@@ -277,17 +272,19 @@ function generateStubArchitecture(
 
   const extraEntities: ArchitectureEntity[] =
     spec.architectLens.entities
-      .filter((e) => e.name.toLowerCase() !== "user")
-      .map<ArchitectureEntity>((e) => ({
-        name: e.name || "PrimaryObject",
-        fields: [
-          { name: "id", type: "uuid" },
-          { name: "userId", type: "uuid" },
-          { name: "title", type: "text" },
-          { name: "data", type: "jsonb", nullable: true },
-          { name: "createdAt", type: "timestamptz" },
-        ],
-      })) || [];
+      .filter((e: any) => e.name.toLowerCase() !== "user")
+      .map(
+        (e: any): ArchitectureEntity => ({
+          name: e.name || "PrimaryObject",
+          fields: [
+            { name: "id", type: "uuid" },
+            { name: "userId", type: "uuid" },
+            { name: "title", type: "text" },
+            { name: "data", type: "jsonb", nullable: true },
+            { name: "createdAt", type: "timestamptz" },
+          ],
+        })
+      ) || [];
 
   const entities = [...baseEntities, ...extraEntities];
 
@@ -310,8 +307,7 @@ function generateStubArchitecture(
     database: "Postgres",
     hosting: "Vercel",
     authProvider: "NextAuth",
-    billingProvider:
-      buildType === "app" || buildType === "client_project" ? "Stripe" : null,
+    billingProvider: buildType === "app" ? "Stripe" : null,
     queue: null,
   };
 

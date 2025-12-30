@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import {
-  requireUserOrDemo,
-  getProjectOrThrow,
-} from "@/app/api/builder/_shared";
+  loadProjectOrRes,
+  updateProjectOrRes,
+} from "@/app/api/builder/_project";
 import type { BuilderProject } from "@/lib/builder/types";
 
 /**
@@ -374,8 +374,6 @@ function runDiagnostics(project: any) {
 }
 
 export async function POST(req: Request) {
-  const { supabase, userId } = await requireUserOrDemo();
-
   let body: PostBody;
   try {
     body = await req.json();
@@ -386,15 +384,17 @@ export async function POST(req: Request) {
   if (!body.projectId)
     return NextResponse.json({ error: "Missing projectId" }, { status: 400 });
 
-  const loaded = await getProjectOrThrow({
-    supabase,
+  const loaded = await loadProjectOrRes({
     projectId: body.projectId,
-    userId,
     caller: "POST /api/builder/autofix-lock",
   });
-  if (loaded.res) return loaded.res;
 
-  const project = loaded.project as any;
+  if (loaded.res) return loaded.res;
+  const { project, userId, supabase } = loaded;
+
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   // Snapshot before (capture original state)
   const originalProject = project;
@@ -534,7 +534,7 @@ export async function POST(req: Request) {
   };
 
   const finalExport = {
-    ...(originalProject.export_plan_json ?? {}),
+    ...(project.export_plan_json ?? {}),
     patches: [
       {
         id: mkId("patch"),
@@ -562,9 +562,11 @@ export async function POST(req: Request) {
   };
 
   // Persist to DB
-  const { data: updated, error: updateErr } = await supabase
-    .from("builder_projects")
-    .update({
+  const updated = await updateProjectOrRes({
+    projectId: body.projectId,
+    userId,
+    supabase,
+    patch: {
       spec_json: projectState.spec_json ?? null,
       architecture_json: projectState.architecture_json ?? null,
       deployment_plan_json: projectState.deployment_plan_json ?? null,
@@ -572,24 +574,17 @@ export async function POST(req: Request) {
       diagnostics_json: projectState.diagnostics_json ?? null,
       export_plan_json: finalExport,
       status: "locked",
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", body.projectId)
-    .eq("user_id", userId)
-    .select("*")
-    .single();
+    },
+    caller: "POST /api/builder/autofix-lock",
+  });
 
-  if (updateErr) {
-    console.error("[POST /api/builder/autofix-lock] update error:", updateErr);
-    return NextResponse.json(
-      { error: "Failed to save autofix lock result" },
-      { status: 500 }
-    );
+  if (updated.res) {
+    return updated.res;
   }
 
   return NextResponse.json(
     {
-      project: updated,
+      project: updated.project,
       locked,
       before: { beforeTop, beforeTest },
       after: { afterTop, afterTest },

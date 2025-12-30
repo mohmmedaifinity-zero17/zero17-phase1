@@ -3,16 +3,14 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server"; // adjust if your helper path differs
-import type {
-  BuilderProject,
-  BuilderBuildType,
-  MultiLensSpec,
-  FounderLens,
-  ArchitectLens,
-  QaLens,
-  ClientLens,
-  AgentLens,
-} from "@/lib/builder/types";
+import type { BuilderProject, BuilderBuildType } from "@/lib/builder/types";
+
+type MultiLensSpec = any;
+type FounderLens = any;
+type ArchitectLens = any;
+type QaLens = any;
+type ClientLens = any;
+type AgentLens = any;
 
 type GenerateBody = {
   mode: "generate";

@@ -121,7 +121,7 @@ function buildDeploymentPlan(project: BuilderProject): DeploymentPlan {
 
   return {
     summary,
-    targetEnv: "production",
+    target: "production",
     steps,
   };
 }
@@ -196,7 +196,7 @@ export async function POST(req: Request) {
     phase: "deployment_plan",
     status: "success",
     meta_json: {
-      steps: plan.steps.length,
+      steps: plan.steps?.length ?? 0,
     },
   });
 

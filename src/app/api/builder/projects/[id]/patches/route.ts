@@ -1,6 +1,6 @@
 // src/app/api/builder/projects/[id]/patches/route.ts
 import { NextResponse } from "next/server";
-import { getUserIdOrDev } from "@/lib/builder/server/auth";
+import { getCtx } from "@/app/api/builder/_shared";
 import {
   devFindProject,
   devAddPatch,
@@ -42,8 +42,12 @@ function snapshotProject(p: BuilderProject): Partial<BuilderProject> {
 
 export async function GET(_: Request, ctx: { params: { id: string } }) {
   try {
-    const { userId } = await getUserIdOrDev();
+    const { userId } = await getCtx();
     const id = ctx.params.id;
+
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     const project = devFindProject(userId, id);
     if (!project) {
@@ -64,8 +68,12 @@ export async function GET(_: Request, ctx: { params: { id: string } }) {
 
 export async function POST(req: Request, ctx: { params: { id: string } }) {
   try {
-    const { userId } = await getUserIdOrDev();
+    const { userId } = await getCtx();
     const id = ctx.params.id;
+
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     const body = await req.json().catch(() => ({}));
     const action = String(body?.action || "create");
@@ -101,7 +109,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
       label,
       note,
       createdAt: new Date().toISOString(),
-      author: "dev",
+      author: userId,
       snapshot: snapshotProject(project),
     };
 

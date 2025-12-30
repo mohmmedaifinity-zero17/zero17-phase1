@@ -7,7 +7,6 @@ import Link from "next/link";
 import Image from "next/image";
 
 import ClientProviders from "@/app/ClientProviders";
-import GlobalAuthBar from "@/components/GlobalAuthBar";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -63,8 +62,13 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               <NavLink href="/pricing" label="Pricing" />
               <NavLink href="/about" label="About" />
 
-              {/* ✅ GLOBAL AUTH (platform-wide) */}
-              <GlobalAuthBar />
+              {/* Auth disabled while Builder Lab is being finalized */}
+              <Link
+                href="/pricing"
+                className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-800 hover:bg-slate-50"
+              >
+                Pricing
+              </Link>
 
               <Link
                 href="/helix"

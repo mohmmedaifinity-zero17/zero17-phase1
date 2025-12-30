@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import type { BuilderProject, DeploymentPlan } from "@/lib/builder/types";
 import {
-  requireUserOrDemo,
-  getProjectOrThrow,
-} from "@/app/api/builder/_shared";
+  loadProjectOrRes,
+  updateProjectOrRes,
+} from "@/app/api/builder/_project";
 
 type PostBody = { projectId: string };
 
@@ -21,12 +21,27 @@ function buildDeploymentPlan(project: BuilderProject): DeploymentPlan {
         required: true,
         hint: "Supabase anon key",
       },
+      {
+        key: "SUPABASE_SERVICE_ROLE_KEY",
+        required: false,
+        hint: "Server-only (needed in DEMO mode)",
+      },
+      {
+        key: "ZERO17_DEMO_MODE",
+        required: false,
+        hint: "Set to 1 for Builder Lab without auth",
+      },
+      {
+        key: "ZERO17_DEMO_USER_ID",
+        required: false,
+        hint: "UUID demo user id (matches rows)",
+      },
     ],
     steps: [
       {
         id: "repo",
         title: "Connect repo",
-        detail: "Push to GitHub. Ensure main branch is deployable.",
+        detail: "Push to GitHub. Ensure main deploys.",
       },
       {
         id: "env",
@@ -35,62 +50,58 @@ function buildDeploymentPlan(project: BuilderProject): DeploymentPlan {
       },
       {
         id: "db",
-        title: "DB readiness",
-        detail: "Verify tables + RLS policies.",
+        title: "Database readiness",
+        detail: "Tables + RLS ok; migrations applied if used.",
       },
       {
         id: "deploy",
         title: "Deploy",
-        detail: "Deploy to Vercel and verify routing.",
+        detail: "Deploy to Vercel, verify routing + API.",
       },
     ],
     smokeChecks: [
-      "Open landing route and verify layout loads.",
-      "Create a builder project and ensure it persists.",
-      "Run Virtual tests + Scan once in production.",
+      "Open /builder and verify it loads.",
+      "Create project and confirm it appears in list.",
+      "Run Tests then Scan.",
+      "Generate Docs then Diagnostics.",
     ],
-    rollback: ["Rollback Vercel deployment", "Revert commit if needed"],
+    rollback: [
+      "Rollback previous Vercel deployment",
+      "Revert last commit",
+      "If migration applied, rollback migration (if defined)",
+    ],
     summary: `Deploy blueprint for “${project.title}”.`,
   } as any;
 }
 
 export async function POST(req: Request) {
-  const { supabase, userId } = await requireUserOrDemo();
-
-  let body: PostBody;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
-  if (!body.projectId)
+  const body = (await req.json().catch(() => null)) as PostBody | null;
+  if (!body?.projectId)
     return NextResponse.json({ error: "Missing projectId" }, { status: 400 });
 
-  const loaded = await getProjectOrThrow({
-    supabase,
+  const loaded = await loadProjectOrRes({
     projectId: body.projectId,
-    userId,
     caller: "POST /api/builder/deploy-plan",
   });
   if (loaded.res) return loaded.res;
 
-  const plan = buildDeploymentPlan(loaded.project as BuilderProject);
+  const { project, userId, supabase } = loaded;
 
-  const { data: updated, error: updateErr } = await supabase
-    .from("builder_projects")
-    .update({ deployment_plan_json: plan, status: "deploy_planned" })
-    .eq("id", body.projectId)
-    .eq("user_id", userId)
-    .select("*")
-    .single();
-
-  if (updateErr) {
-    console.error("[POST /api/builder/deploy-plan] update error:", updateErr);
-    return NextResponse.json(
-      { error: "Failed to save deploy plan" },
-      { status: 500 }
-    );
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  return NextResponse.json({ project: updated }, { status: 200 });
+  const plan = buildDeploymentPlan(project);
+
+  const res = await updateProjectOrRes({
+    projectId: project.id,
+    userId,
+    supabase,
+    patch: { deployment_plan_json: plan, status: "deploy_planned" },
+    caller: "POST /api/builder/deploy-plan",
+  });
+
+  return (
+    res.res ?? NextResponse.json({ project: res.project }, { status: 200 })
+  );
 }

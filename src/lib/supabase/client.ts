@@ -7,11 +7,3 @@ export function createSupabaseBrowserClient() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 }
-
-// Alias for consistency with server-side createClient
-export function createClient() {
-  return createSupabaseBrowserClient();
-}
-
-// Singleton instance for convenience (used by useSupabaseUser)
-export const supabaseBrowser = createSupabaseBrowserClient();

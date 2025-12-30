@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import {
-  requireUserOrDemo,
-  getProjectOrThrow,
-} from "@/app/api/builder/_shared";
+  loadProjectOrRes,
+  updateProjectOrRes,
+} from "@/app/api/builder/_project";
 import type { BuilderProject } from "@/lib/builder/types";
 
 type Body = {
@@ -13,8 +13,6 @@ export async function POST(
   req: Request,
   { params }: { params: { id: string } }
 ) {
-  const { supabase, userId } = await requireUserOrDemo();
-
   const id = params?.id;
   if (!id) {
     return NextResponse.json({ error: "Missing project id" }, { status: 400 });
@@ -27,36 +25,32 @@ export async function POST(
     // body is optional, ignore
   }
 
-  const loaded = await getProjectOrThrow({
-    supabase,
+  const loaded = await loadProjectOrRes({
     projectId: id,
-    userId,
     caller: "POST /api/builder/projects/[id]/lock",
   });
+
   if (loaded.res) return loaded.res;
 
-  const project = loaded.project as BuilderProject;
+  const { project, userId, supabase } = loaded;
+
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const isLocked = String(project.status || "").toLowerCase() === "locked";
-
   const nextLocked = typeof body.locked === "boolean" ? body.locked : !isLocked;
-
   const nextStatus = nextLocked ? "locked" : "draft";
 
-  const { data: updated, error: updateError } = await supabase
-    .from("builder_projects")
-    .update({ status: nextStatus })
-    .eq("id", project.id)
-    .eq("user_id", userId)
-    .select("*")
-    .maybeSingle();
+  const res = await updateProjectOrRes({
+    projectId: project.id,
+    userId,
+    supabase,
+    patch: { status: nextStatus },
+    caller: "POST /api/builder/projects/[id]/lock",
+  });
 
-  if (updateError || !updated) {
-    console.error("[lock] update error:", updateError);
-    return NextResponse.json(
-      { error: "Failed to toggle lock (RLS/policy or update failed)" },
-      { status: 500 }
-    );
-  }
+  if (res.res) return res.res;
 
   // Optional run log (safe if builder_runs exists)
   try {
@@ -68,6 +62,5 @@ export async function POST(
     });
   } catch {}
 
-  // ✅ CANONICAL: return { project }
-  return NextResponse.json({ project: updated }, { status: 200 });
+  return NextResponse.json({ project: res.project }, { status: 200 });
 }

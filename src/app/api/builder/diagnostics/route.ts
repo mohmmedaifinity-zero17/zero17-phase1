@@ -5,10 +5,7 @@ import type {
   DiagnosticItem,
   TestCase,
 } from "@/lib/builder/types";
-import {
-  requireUserOrDemo,
-  getProjectOrThrow,
-} from "@/app/api/builder/_shared";
+import { loadProjectOrRes } from "@/app/api/builder/_project";
 
 type PostBody = { projectId: string };
 
@@ -43,6 +40,7 @@ function buildDiagnostics(project: BuilderProject): DiagnosticsReport {
       phase: "Phase 1",
     });
   }
+
   if (!project.architecture_json) {
     add({
       area: "Architecture",
@@ -57,6 +55,7 @@ function buildDiagnostics(project: BuilderProject): DiagnosticsReport {
 
   const tcases: TestCase[] = (project.test_plan_json?.cases ?? []) as any;
   const fails = tcases.filter((c) => c.status === "virtual_fail");
+
   for (const f of fails.slice(0, 8)) {
     add({
       area: "Tests",
@@ -90,7 +89,7 @@ function buildDiagnostics(project: BuilderProject): DiagnosticsReport {
       area: "Docs",
       severity: "info",
       symptom: "Docs pack not generated",
-      likelyCause: "Phase 9 not run.",
+      likelyCause: "Docs phase not run.",
       suggestedFix: "Run Docs pack.",
       minutes: 4,
       phase: "Phase 9",
@@ -103,7 +102,7 @@ function buildDiagnostics(project: BuilderProject): DiagnosticsReport {
       severity: "info",
       symptom: "No obvious structural risks detected.",
       likelyCause: "Core artifacts present.",
-      suggestedFix: "Ship small cohort and convert incidents to tests.",
+      suggestedFix: "Ship to a small cohort and convert issues into tests.",
       minutes: 15,
       phase: "Next",
     });
@@ -126,42 +125,43 @@ function buildDiagnostics(project: BuilderProject): DiagnosticsReport {
 }
 
 export async function POST(req: Request) {
-  const { supabase, userId } = await requireUserOrDemo();
-
-  let body: PostBody;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
-  if (!body.projectId)
+  const body = (await req.json().catch(() => null)) as PostBody | null;
+  if (!body?.projectId)
     return NextResponse.json({ error: "Missing projectId" }, { status: 400 });
 
-  const loaded = await getProjectOrThrow({
-    supabase,
+  const loaded = await loadProjectOrRes({
     projectId: body.projectId,
-    userId,
     caller: "POST /api/builder/diagnostics",
   });
   if (loaded.res) return loaded.res;
 
-  const diags = buildDiagnostics(loaded.project as BuilderProject);
+  const { project, userId, supabase } = loaded;
 
-  const { data: updated, error: updateErr } = await supabase
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const report = buildDiagnostics(project);
+
+  const { data: updated, error } = await supabase
     .from("builder_projects")
-    .update({ diagnostics_json: diags, status: "diagnosed" })
-    .eq("id", body.projectId)
+    .update({
+      diagnostics_json: report,
+      status: "diagnosed",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", project.id)
     .eq("user_id", userId)
     .select("*")
     .single();
 
-  if (updateErr) {
-    console.error("[POST /api/builder/diagnostics] update error:", updateErr);
+  if (error || !updated) {
+    console.error("[POST /api/builder/diagnostics] update error:", error);
     return NextResponse.json(
-      { error: "Failed to save diagnostics" },
+      { error: "Failed to save diagnostics", details: error?.message },
       { status: 500 }
     );
   }
 
-  return NextResponse.json({ project: updated }, { status: 200 });
+  return NextResponse.json({ project: updated, report }, { status: 200 });
 }
